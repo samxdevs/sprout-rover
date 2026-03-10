@@ -1,9 +1,33 @@
 import './styles.css';
+import {
+  signUpUser,
+  loginUser,
+  logoutUser,
+  resetPassword,
+  onAuthChange,
+  getUserProfile,
+  validateSignUpInput,
+  validateLoginInput,
+  getFirebaseErrorMessage,
+  type UserProfile,
+} from './auth';
+import { connectLiveStream } from './server';
 
 // ============================================
 // APP STATE
 // ============================================
-const state = {
+const state: {
+  currentScreen: string;
+  isLoggedIn: boolean;
+  aiActive: boolean;
+  speed: number;
+  zoom: number;
+  resetTimer: number;
+  darkMode: boolean;
+  notifications: boolean;
+  userProfile: UserProfile | null;
+  isLoading: boolean;
+} = {
   currentScreen: 'login',
   isLoggedIn: false,
   aiActive: false,
@@ -12,7 +36,49 @@ const state = {
   resetTimer: 60,
   darkMode: false,
   notifications: true,
+  userProfile: null,
+  isLoading: false,
 };
+
+// ============================================
+// FORM ERROR DISPLAY HELPERS
+// ============================================
+function showFieldError(fieldId: string, message: string) {
+  const wrapper = document.getElementById(fieldId)?.closest('.form-group');
+  if (!wrapper) return;
+  // Remove existing error
+  const existing = wrapper.querySelector('.field-error');
+  if (existing) existing.remove();
+  // Add error
+  const errorEl = document.createElement('div');
+  errorEl.className = 'field-error';
+  errorEl.style.cssText = 'color: #DC2626; font-size: 12px; margin-top: 4px; font-weight: 500;';
+  errorEl.textContent = message;
+  wrapper.appendChild(errorEl);
+  // Highlight input
+  const inputWrapper = wrapper.querySelector('.input-wrapper') as HTMLElement;
+  if (inputWrapper) inputWrapper.style.borderColor = '#DC2626';
+}
+
+function clearFieldErrors() {
+  document.querySelectorAll('.field-error').forEach(el => el.remove());
+  document.querySelectorAll('.input-wrapper').forEach(el => {
+    (el as HTMLElement).style.borderColor = '';
+  });
+}
+
+function setButtonLoading(btnId: string, loading: boolean, originalText: string) {
+  const btn = document.getElementById(btnId) as HTMLButtonElement;
+  if (!btn) return;
+  btn.disabled = loading;
+  if (loading) {
+    btn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:8px;"><span class="material-symbols-outlined" style="animation:spin 1s linear infinite;font-size:18px;">progress_activity</span> Please wait...</span>';
+    btn.style.opacity = '0.7';
+  } else {
+    btn.textContent = originalText;
+    btn.style.opacity = '1';
+  }
+}
 
 // ============================================
 // SPROUT LOGO SVG
@@ -299,7 +365,8 @@ function renderControl() {
       <div class="main-content">
         <!-- Live Video Feed -->
         <div class="video-feed" id="video-feed">
-          <img src="/images/rover-field.png" alt="Live rover feed" />
+          <img src="/images/rover-field.png" alt="Live rover feed" id="live-feed-img"
+               onerror="this.src='/images/rover-field.png'" />
           <div class="video-overlay">
             <div class="rec-badge">
               <span class="rec-dot"></span>
@@ -736,7 +803,7 @@ function renderSettings() {
 // ============================================
 function render() {
   const app = document.getElementById('app')!;
-  
+
   switch (state.currentScreen) {
     case 'login':
       app.innerHTML = renderLogin();
@@ -774,7 +841,7 @@ function render() {
       app.innerHTML = renderLogin();
       setupLoginEvents();
   }
-  
+
   // Setup bottom nav events for main app screens
   if (['control', 'maps', 'diagnostics', 'settings'].includes(state.currentScreen)) {
     setupBottomNavEvents();
@@ -796,10 +863,34 @@ function setupBottomNavEvents() {
 
 function setupLoginEvents() {
   const loginBtn = document.getElementById('login-btn');
-  loginBtn?.addEventListener('click', () => {
-    state.isLoggedIn = true;
-    showToast('Welcome back, farmer! 🌱');
-    navigate('control');
+  loginBtn?.addEventListener('click', async () => {
+    clearFieldErrors();
+    const email = (document.getElementById('login-email') as HTMLInputElement)?.value || '';
+    const password = (document.getElementById('login-password') as HTMLInputElement)?.value || '';
+
+    // Client-side validation
+    const validation = validateLoginInput(email, password);
+    if (!validation.isValid) {
+      if (validation.errors.email) showFieldError('login-email', validation.errors.email);
+      if (validation.errors.password) showFieldError('login-password', validation.errors.password);
+      return;
+    }
+
+    // Firebase login
+    setButtonLoading('login-btn', true, 'Login');
+    try {
+      const { profile } = await loginUser(email, password);
+      state.isLoggedIn = true;
+      state.userProfile = profile;
+      showToast(`Welcome back${profile?.fullName ? ', ' + profile.fullName : ''}! 🌱`);
+      navigate('control');
+    } catch (err: any) {
+      const code = err?.code || '';
+      const message = getFirebaseErrorMessage(code) || err.message;
+      showToast('❌ ' + message);
+    } finally {
+      setButtonLoading('login-btn', false, 'Login');
+    }
   });
 
   // Toggle password visibility
@@ -819,9 +910,38 @@ function setupLoginEvents() {
 
 function setupSignUpEvents() {
   const signupBtn = document.getElementById('signup-btn');
-  signupBtn?.addEventListener('click', () => {
-    showToast('Account created successfully! 🎉');
-    navigate('login');
+  signupBtn?.addEventListener('click', async () => {
+    clearFieldErrors();
+    const fullName = (document.getElementById('signup-name') as HTMLInputElement)?.value || '';
+    const email = (document.getElementById('signup-email') as HTMLInputElement)?.value || '';
+    const organization = (document.getElementById('signup-org') as HTMLInputElement)?.value || '';
+    const password = (document.getElementById('signup-password') as HTMLInputElement)?.value || '';
+    const agreedToTerms = (document.getElementById('agree-terms') as HTMLInputElement)?.checked || false;
+
+    // Client-side validation with inline errors
+    const validation = validateSignUpInput(fullName, email, organization, password, agreedToTerms);
+    if (!validation.isValid) {
+      if (validation.errors.fullName) showFieldError('signup-name', validation.errors.fullName);
+      if (validation.errors.email) showFieldError('signup-email', validation.errors.email);
+      if (validation.errors.organization) showFieldError('signup-org', validation.errors.organization);
+      if (validation.errors.password) showFieldError('signup-password', validation.errors.password);
+      if (validation.errors.terms) showToast('⚠️ ' + validation.errors.terms);
+      return;
+    }
+
+    // Firebase sign up + Firestore profile save
+    setButtonLoading('signup-btn', true, 'Create Account');
+    try {
+      await signUpUser(fullName, email, organization, password, agreedToTerms);
+      showToast('Account created successfully! 🎉 Please log in.');
+      navigate('login');
+    } catch (err: any) {
+      const code = err?.code || '';
+      const message = getFirebaseErrorMessage(code) || err.message;
+      showToast('❌ ' + message);
+    } finally {
+      setButtonLoading('signup-btn', false, 'Create Account');
+    }
   });
 
   const togglePw = document.getElementById('toggle-signup-pw');
@@ -840,10 +960,27 @@ function setupSignUpEvents() {
 
 function setupForgotPasswordEvents() {
   const sendBtn = document.getElementById('send-reset-btn');
-  sendBtn?.addEventListener('click', () => {
-    state.resetTimer = 60;
-    showToast('Reset link sent! 📧');
-    navigate('reset-success');
+  sendBtn?.addEventListener('click', async () => {
+    clearFieldErrors();
+    const email = (document.getElementById('reset-email') as HTMLInputElement)?.value || '';
+    if (!email.trim()) {
+      showFieldError('reset-email', 'Email address is required');
+      return;
+    }
+
+    setButtonLoading('send-reset-btn', true, 'Send Reset Link');
+    try {
+      await resetPassword(email);
+      state.resetTimer = 60;
+      showToast('Reset link sent! 📧');
+      navigate('reset-success');
+    } catch (err: any) {
+      const code = err?.code || '';
+      const message = getFirebaseErrorMessage(code) || err.message;
+      showToast('❌ ' + message);
+    } finally {
+      setButtonLoading('send-reset-btn', false, 'Send Reset Link');
+    }
   });
 }
 
@@ -880,6 +1017,16 @@ function setupResetSuccessEvents() {
 }
 
 function setupControlEvents() {
+  // Try to connect live stream from AI server
+  const feedImg = document.getElementById('live-feed-img') as HTMLImageElement;
+  if (feedImg) {
+    connectLiveStream(feedImg).then(connected => {
+      if (connected) {
+        showToast('📡 Live stream connected');
+      }
+    });
+  }
+
   // AI Button
   const aiBtn = document.getElementById('ai-btn');
   aiBtn?.addEventListener('click', () => {
@@ -896,7 +1043,7 @@ function setupControlEvents() {
         entry.innerHTML = `
           <div class="log-dot"></div>
           <span class="log-text">AI Automation enabled — scanning field...</span>
-          <span class="log-time">${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+          <span class="log-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
         `;
         log.prepend(entry);
       }
@@ -943,7 +1090,7 @@ function setupControlEvents() {
       entry.innerHTML = `
         <div class="log-dot" style="background: var(--red);"></div>
         <span class="log-text" style="color: var(--red); font-weight: 600;">EMERGENCY STOP — Rover halted</span>
-        <span class="log-time">${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+        <span class="log-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
       `;
       log.prepend(entry);
     }
@@ -972,18 +1119,18 @@ function setupJoystick() {
     const rect = areaRect();
     const centerX = rect.left + rect.width / 2;
     const centerY = rect.top + rect.height / 2;
-    
+
     let dx = clientX - centerX;
     let dy = clientY - centerY;
-    
+
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist > maxRadius) {
       dx = (dx / dist) * maxRadius;
       dy = (dy / dist) * maxRadius;
     }
-    
-    knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-    
+
+    if (knob) knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+
     // Update values
     const joyX = document.getElementById('joy-x');
     const joyY = document.getElementById('joy-y');
@@ -994,7 +1141,7 @@ function setupJoystick() {
   }
 
   function resetKnob() {
-    knob.style.transform = 'translate(-50%, -50%)';
+    if (knob) knob.style.transform = 'translate(-50%, -50%)';
     const joyX = document.getElementById('joy-x');
     const joyY = document.getElementById('joy-y');
     const joyV = document.getElementById('joy-v');
@@ -1091,10 +1238,16 @@ function setupSettingsEvents() {
 
   // Logout
   const logoutBtn = document.getElementById('logout-btn');
-  logoutBtn?.addEventListener('click', () => {
-    state.isLoggedIn = false;
-    showToast('Logged out successfully');
-    navigate('login');
+  logoutBtn?.addEventListener('click', async () => {
+    try {
+      await logoutUser();
+      state.isLoggedIn = false;
+      state.userProfile = null;
+      showToast('Logged out successfully');
+      navigate('login');
+    } catch (err: any) {
+      showToast('❌ Error logging out: ' + err.message);
+    }
   });
 
   // Profile click
@@ -1112,6 +1265,20 @@ function setupSettingsEvents() {
     (item as HTMLElement).style.cursor = 'pointer';
   });
 }
+
+// ============================================
+// AUTH STATE LISTENER
+// ============================================
+onAuthChange(async (user) => {
+  if (user) {
+    state.isLoggedIn = true;
+    const profile = await getUserProfile(user.uid);
+    state.userProfile = profile;
+  } else {
+    state.isLoggedIn = false;
+    state.userProfile = null;
+  }
+});
 
 // ============================================
 // INIT
