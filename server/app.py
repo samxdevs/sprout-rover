@@ -10,7 +10,6 @@ Main application server providing:
 
 import os
 import time
-import json
 import base64
 import logging
 from datetime import datetime
@@ -344,13 +343,18 @@ def emit_telemetry():
 # ============================================
 # MAIN
 # ============================================
+
+# Read port from environment (Hugging Face Spaces uses 7860)
+PORT = int(os.environ.get('PORT', 7860))
+
+# Start telemetry emitter as a background task
+# This runs whether started via `python app.py` or via gunicorn
+socketio.start_background_task(emit_telemetry)
+
 if __name__ == '__main__':
-    # Start telemetry emitter in background
-    socketio.start_background_task(emit_telemetry)
-
     logger.info("🌱 Sprout AI Server starting...")
-    logger.info("   REST API:  http://localhost:5000/api/health")
-    logger.info("   Stream:    http://localhost:5000/api/stream")
-    logger.info("   WebSocket: ws://localhost:5000/socket.io")
+    logger.info(f"   REST API:  http://localhost:{PORT}/api/health")
+    logger.info(f"   Stream:    http://localhost:{PORT}/api/stream")
+    logger.info(f"   WebSocket: ws://localhost:{PORT}/socket.io")
 
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+    socketio.run(app, host='0.0.0.0', port=PORT, debug=False)

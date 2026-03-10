@@ -7,7 +7,9 @@
 // - REST API calls to AI endpoints
 // ============================================
 
-const SERVER_URL = 'http://localhost:5000';
+// Change this to your Hugging Face Spaces URL after deployment:
+// e.g. 'https://YOUR-USERNAME-sprout-ai-server.hf.space'
+const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:7860';
 const STREAM_URL = `${SERVER_URL}/api/stream`;
 
 // ============================================
