@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 9 (API 28) and later block cleartext HTTP by default. The Sprout AI
+  server (server/app.py) is served over plain HTTP during development, so the
+  loopback hosts it can be reached on are opted back in here.
+
+  10.0.2.2 is how the Android emulator addresses the host machine's localhost —
+  a device on the same network needs its own entry, or better, set
+  VITE_SERVER_URL to an https:// URL.
+
+  Deliberately scoped to loopback/dev addresses: a blanket
+  android:usesCleartextTraffic="true" would permit unencrypted traffic to any
+  host, including in release builds.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

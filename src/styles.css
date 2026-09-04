@@ -35,6 +35,50 @@
   --transition: 0.2s ease;
 }
 
+/* ============================================
+   DARK THEME
+   ============================================
+   Set by theme.ts via data-theme on <html>. Only the colour tokens are
+   overridden — every component already draws from these variables, so no
+   per-component dark rules are needed.
+
+   Greens are lightened here: the light-mode --primary (#2c5926) fails
+   contrast against a dark surface, so the palette shifts up rather than
+   simply inverting. */
+[data-theme="dark"] {
+  --primary: #5a9e4f;
+  --primary-light: #6fb862;
+  --primary-dark: #3a7a32;
+  --primary-bg: #1c2a1a;
+  --bg: #121612;
+  --bg-card: #1b201b;
+  --bg-input: #242a24;
+  --text-primary: #f2f5f2;
+  --text-secondary: #a8b3a6;
+  --text-muted: #7a857a;
+  --border: #2f372f;
+  --border-light: #262d26;
+  --red-light: #3b1a1a;
+  --green-success: #4ade80;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
+}
+
+/* Photos and map tiles are bright enough to glare against dark chrome. */
+[data-theme="dark"] .video-feed img,
+[data-theme="dark"] .map-container img,
+[data-theme="dark"] .disease-image img {
+  filter: brightness(0.88);
+}
+
+/* The toast paints its background from --text-primary for contrast against
+   the page. That token flips to near-white in dark mode, so the hardcoded
+   white label has to flip with it or the text disappears. */
+[data-theme="dark"] .toast {
+  color: var(--bg);
+}
+
 /* --- Reset & Base --- */
 *,
 *::before,
@@ -1715,3 +1759,589 @@ textarea {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
+/* ============================================
+   PROMPT MODAL
+   ============================================ */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 1000;
+  opacity: 0;
+  transition: opacity var(--transition);
+}
+
+.modal-overlay.show {
+  opacity: 1;
+}
+
+.modal-card {
+  background: var(--bg-card);
+  border-radius: var(--radius-xl);
+  padding: 24px;
+  width: 100%;
+  max-width: 360px;
+  box-shadow: var(--shadow-lg);
+  transform: translateY(12px);
+  transition: transform var(--transition);
+}
+
+.modal-overlay.show .modal-card {
+  transform: translateY(0);
+}
+
+.modal-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.modal-label {
+  display: block;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.modal-input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 15px;
+  outline: none;
+  transition: border-color var(--transition);
+}
+
+.modal-input:focus {
+  border-color: var(--primary);
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.modal-btn {
+  flex: 1;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.modal-btn:hover {
+  background: var(--bg-input);
+}
+
+.modal-btn.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.modal-btn.primary:hover {
+  background: var(--primary-light);
+}
+
+/* ============================================
+   LIVE FEED — device camera + capture strip
+   ============================================ */
+
+/* The still and the live preview occupy the same box and are swapped by the
+   `hidden` attribute, so both are taken out of flow and stretched to fill the
+   panel. In normal flow they would stack vertically instead of overlaying, and
+   `transform: scale()` would scale each one visually while leaving its layout
+   box behind — which pushed the feed down the panel instead of zooming it. */
+.video-feed img,
+.video-feed video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform-origin: center center;
+  transition: transform 0.15s ease-out;
+}
+
+/* The global `img { display: block }` outranks the UA stylesheet's
+   `[hidden] { display: none }`, so hiding the still needs an author rule with
+   at least as much specificity — otherwise it stays visible over the camera. */
+.video-feed img[hidden],
+.video-feed video[hidden] {
+  display: none;
+}
+
+.feed-source-chip {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  backdrop-filter: blur(4px);
+}
+
+.video-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Inline "Clear" affordance inside a section label. */
+.link-btn {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--primary);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.link-btn:hover {
+  text-decoration: underline;
+}
+
+.capture-strip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  margin-bottom: 16px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.capture-strip::-webkit-scrollbar {
+  height: 4px;
+}
+
+.capture-strip::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: var(--radius-full);
+}
+
+.capture-thumb {
+  position: relative;
+  flex: 0 0 auto;
+  width: 84px;
+  height: 60px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  padding: 0;
+  cursor: pointer;
+  transition: transform var(--transition), border-color var(--transition);
+}
+
+.capture-thumb:hover {
+  transform: translateY(-2px);
+  border-color: var(--primary);
+}
+
+.capture-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.capture-thumb-time {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 0;
+}
+
+.capture-empty {
+  font-size: 13px;
+  color: var(--text-muted);
+  padding: 16px 12px;
+  background: var(--bg-card);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  width: 100%;
+  text-align: center;
+}
+
+/* ============================================
+   LEAFLET MAP
+   ============================================ */
+.map-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+/* Leaflet sets its own stacking context; keep it under the overlay controls. */
+.map-canvas .leaflet-pane {
+  z-index: 1;
+}
+
+.map-canvas .leaflet-control-attribution {
+  font-size: 9px;
+  background: rgba(255, 255, 255, 0.75);
+}
+
+[data-theme="dark"] .map-canvas .leaflet-control-attribution {
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--text-secondary);
+}
+
+[data-theme="dark"] .map-canvas .leaflet-tile-pane {
+  filter: brightness(0.8) saturate(0.9);
+}
+
+/* Rover position marker (a divIcon, so it is styled here rather than by an image) */
+.rover-leaflet-marker .rover-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--primary);
+  border: 3px solid #fff;
+  box-shadow: 0 0 0 2px rgba(44, 89, 38, 0.4), 0 2px 6px rgba(0, 0, 0, 0.4);
+  animation: roverPulse 2s ease-in-out infinite;
+}
+
+@keyframes roverPulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(44, 89, 38, 0.4), 0 2px 6px rgba(0, 0, 0, 0.4); }
+  50%      { box-shadow: 0 0 0 8px rgba(44, 89, 38, 0.05), 0 2px 6px rgba(0, 0, 0, 0.4); }
+}
+
+.map-controls,
+.map-center-btn {
+  z-index: 2;
+}
+
+/* ============================================
+   DIAGNOSTICS — inference states, spray advice
+   ============================================ */
+.inference-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+  padding: 28px 20px;
+  background: var(--bg-card);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+  color: var(--text-secondary);
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.inference-placeholder .material-symbols-outlined {
+  font-size: 32px;
+  color: var(--text-muted);
+}
+
+.inference-placeholder.error {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.inference-placeholder.error .material-symbols-outlined {
+  color: var(--red);
+}
+
+.inference-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.material-symbols-outlined.spin {
+  animation: spin 1s linear infinite;
+}
+
+.inference-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+  margin-top: 8px;
+}
+
+.detection-list {
+  margin-top: 12px;
+  border-top: 1px solid var(--border-light);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.detection-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.detection-conf {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.spray-advice {
+  margin-top: 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.spray-advice.ok {
+  background: rgba(22, 163, 74, 0.12);
+  color: var(--green-success);
+}
+
+.spray-advice.warn {
+  background: rgba(245, 158, 11, 0.14);
+  color: var(--orange);
+}
+
+/* The severity indicator is positioned by inline `left` from the model's
+   severity band, so it needs to be absolutely placed within the bar. */
+.severity-bar {
+  position: relative;
+}
+
+.severity-indicator {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  transition: left var(--transition);
+}
+
+.log-empty {
+  font-size: 13px;
+  color: var(--text-muted);
+  padding: 14px 4px;
+  text-align: center;
+}
+
+/* ============================================
+   MAP — GPS status banner
+   ============================================
+   Sits above the tiles (which Leaflet keeps at z-index 1) whenever there is
+   no usable fix, and offers the two ways out: retry, or type a coordinate. */
+.map-gps-banner {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+  padding: 16px 14px;
+  border-radius: var(--radius-lg);
+  background: rgba(0, 0, 0, 0.78);
+  color: #fff;
+  backdrop-filter: blur(6px);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.map-gps-banner[hidden] {
+  display: none;
+}
+
+.map-gps-banner .material-symbols-outlined {
+  font-size: 28px;
+  opacity: 0.9;
+}
+
+.map-gps-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.map-gps-btn {
+  padding: 7px 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.map-gps-btn:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+/* Device marker — blue, visually distinct from the green rover dot. */
+.device-leaflet-marker .device-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--blue);
+  border: 3px solid #fff;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4), 0 2px 6px rgba(0, 0, 0, 0.4);
+  animation: devicePulse 2s ease-in-out infinite;
+}
+
+@keyframes devicePulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4), 0 2px 6px rgba(0, 0, 0, 0.4); }
+  50%      { box-shadow: 0 0 0 8px rgba(59, 130, 246, 0.05), 0 2px 6px rgba(0, 0, 0, 0.4); }
+}
+
+/* ============================================
+   OTP CODE ENTRY
+   ============================================ */
+.otp-inputs {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.otp-digit {
+  width: 44px;
+  height: 54px;
+  text-align: center;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color var(--transition), box-shadow var(--transition);
+  /* Numeric-only field: the spinner arrows would sit over the digit. */
+  -moz-appearance: textfield;
+}
+
+.otp-digit::-webkit-outer-spin-button,
+.otp-digit::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.otp-digit:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(44, 89, 38, 0.15);
+}
+
+.otp-message {
+  min-height: 20px;
+  font-size: 13px;
+  margin-bottom: 12px;
+  line-height: 1.4;
+}
+
+.otp-message.error {
+  color: var(--red);
+  font-weight: 600;
+}
+
+.otp-message.info {
+  color: var(--text-secondary);
+}
+
+/* Narrow phones: 6 boxes at 44px overflow a 320px viewport. */
+@media (max-width: 360px) {
+  .otp-inputs { gap: 5px; }
+  .otp-digit { width: 38px; height: 48px; font-size: 20px; }
+}
+
+/* Detection boxes layer. Sits above the feed but below the controls, and
+   ignores pointer events so the capture and fullscreen buttons stay usable. */
+.detection-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+  transform-origin: center center;
+  transition: transform 0.15s ease-out;
+}
+
+/* --- Diagnostics: richer inference report --- */
+.inference-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.inference-note .material-symbols-outlined {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.alt-block {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-light);
+}
+
+.alt-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.detection-role {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Colour key matching the boxes drawn on the feed and the server annotation. */
+.role-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 7px;
+  vertical-align: middle;
+  background: var(--purple);
+}
+
+.role-dot.role-weed { background: #dc2626; }
+.role-dot.role-leaf { background: #2cc85a; }
