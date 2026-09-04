@@ -1,0 +1,45 @@
+rules_version = '2';
+
+// Sprout — Firestore security rules
+// Replaces the default test-mode rules (which allow anyone to read/write
+// the whole database and expire 30 days after creation).
+//
+// These rules apply identically to the SDK and the REST API the app uses.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // User profiles: users/{uid}
+    match /users/{userId} {
+      // Reading and modifying a profile requires a signed-in owner whose
+      // email has been verified — the server-side twin of the app's
+      // verify-email gate.
+      allow read: if request.auth != null
+                  && request.auth.uid == userId
+                  && request.auth.token.email_verified == true;
+
+      // Create is the one exception: sign-up writes the profile before the
+      // verification link can possibly have been clicked. Ownership is still
+      // enforced, and the uid field must match so a profile can't be written
+      // that claims to belong to someone else.
+      allow create: if request.auth != null
+                    && request.auth.uid == userId
+                    && request.resource.data.uid == userId;
+
+      // Updates may not reassign the document to another user, and the
+      // role field is server-owned — clients can't promote themselves.
+      allow update: if request.auth != null
+                    && request.auth.uid == userId
+                    && request.auth.token.email_verified == true
+                    && request.resource.data.uid == userId
+                    && request.resource.data.role == resource.data.role;
+
+      allow delete: if false;
+    }
+
+    // Anything not matched above is denied.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

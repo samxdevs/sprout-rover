@@ -12,16 +12,33 @@ import {
     signInWithEmailAndPassword,
     signOut,
     sendPasswordResetEmail,
+    sendEmailVerification,
     onAuthStateChanged,
     type User,
 } from 'firebase/auth';
-import {
-    doc,
-    setDoc,
-    getDoc,
-    serverTimestamp,
-} from 'firebase/firestore';
-import { auth, db } from './firebase';
+import { auth } from './firebase';
+import { getDocument, setDocument, updateDocument } from './firestore-rest';
+
+// Firebase Auth's SDK calls have no timeout of their own. On a WebView with no
+// route to the network they neither resolve nor reject, which surfaced as a
+// login button stuck on "Please wait…" forever. Bounding them turns that into
+// an error the UI can actually show.
+const AUTH_TIMEOUT_MS = 20000;
+
+function withAuthTimeout<T>(op: Promise<T>, what: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const timer = setTimeout(
+            () => reject(new Error(
+                `${what} timed out after ${AUTH_TIMEOUT_MS / 1000}s — check the device's network connection.`
+            )),
+            AUTH_TIMEOUT_MS
+        );
+        op.then(
+            v => { clearTimeout(timer); resolve(v); },
+            e => { clearTimeout(timer); reject(e); }
+        );
+    });
+}
 
 // ============================================
 // TYPES
@@ -163,21 +180,21 @@ export async function signUpUser(
     }
 
     // Step 2: Create Firebase Auth user
-    const userCredential = await createUserWithEmailAndPassword(
-        auth,
-        email.trim(),
-        password
+    const userCredential = await withAuthTimeout(
+        createUserWithEmailAndPassword(auth, email.trim(), password),
+        'Account creation'
     );
     const user = userCredential.user;
 
-    // Step 3: Save profile to Firestore
+    // Step 3: Save profile to Firestore (over REST — see firestore-rest.ts)
+    const now = new Date().toISOString();
     const profile: UserProfile = {
         uid: user.uid,
         fullName: fullName.trim(),
         email: email.trim().toLowerCase(),
         organization: organization.trim(),
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+        createdAt: now,
+        updatedAt: now,
         role: 'operator',
         preferences: {
             darkMode: false,
@@ -190,7 +207,19 @@ export async function signUpUser(
         },
     };
 
-    await setDoc(doc(db, 'users', user.uid), profile);
+    // The Auth account already exists by this point, so a failure here leaves
+    // an account with no profile. ensureUserProfile() repairs that on the next
+    // sign-in rather than blocking the user from proceeding.
+    await setDocument(`users/${user.uid}`, profile as unknown as Record<string, unknown>);
+
+    // Step 4: Send the verification email. Best-effort — the verify screen
+    // has a resend button, so a transient failure here must not undo an
+    // otherwise successful sign-up.
+    try {
+        await sendEmailVerification(user);
+    } catch {
+        // Surfaced on the verify screen via resend.
+    }
 
     return { user, profile };
 }
@@ -215,12 +244,21 @@ export async function loginUser(
     }
 
     // Sign in
-    const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
+    const userCredential = await withAuthTimeout(
+        signInWithEmailAndPassword(auth, email.trim(), password),
+        'Sign-in'
+    );
     const user = userCredential.user;
 
-    // Fetch profile
-    const profileDoc = await getDoc(doc(db, 'users', user.uid));
-    const profile = profileDoc.exists() ? (profileDoc.data() as UserProfile) : null;
+    // Sign-in has already succeeded, so a slow or failed profile read should
+    // not strand the user on the login screen — proceed with a null profile
+    // and let the screens fall back to their defaults.
+    let profile: UserProfile | null = null;
+    try {
+        profile = (await getDocument(`users/${user.uid}`)) as UserProfile | null;
+    } catch {
+        profile = null;
+    }
 
     return { user, profile };
 }
@@ -255,11 +293,110 @@ export function onAuthChange(callback: (user: User | null) => void) {
 }
 
 // ============================================
+// EMAIL VERIFICATION
+// ============================================
+
+/** Re-sends the verification email to the signed-in user. */
+export async function resendVerificationEmail(): Promise<void> {
+    const user = auth.currentUser;
+    if (!user) throw new Error('Not signed in — log in first.');
+    await sendEmailVerification(user);
+}
+
+/**
+ * Re-reads the account from the server and reports whether the email is now
+ * verified. Clicking the emailed link updates the server record only; the
+ * local user object stays stale until reloaded.
+ */
+export async function reloadAndCheckVerified(): Promise<boolean> {
+    const user = auth.currentUser;
+    if (!user) return false;
+    await user.reload();
+    if (auth.currentUser?.emailVerified) {
+        // Refresh the ID token so email_verified is true inside it — security
+        // rules that check the claim would otherwise still see the old token.
+        await auth.currentUser.getIdToken(true).catch(() => {});
+        return true;
+    }
+    return false;
+}
+
+// ============================================
 // GET USER PROFILE
 // ============================================
 export async function getUserProfile(uid: string): Promise<UserProfile | null> {
-    const profileDoc = await getDoc(doc(db, 'users', uid));
-    return profileDoc.exists() ? (profileDoc.data() as UserProfile) : null;
+    return (await getDocument(`users/${uid}`)) as UserProfile | null;
+}
+
+// ============================================
+// PROFILE UPDATES
+// ============================================
+
+/**
+ * Ensures users/{uid} exists. Accounts created outside the sign-up flow
+ * (Firebase Console, REST API) have an Auth record but no profile document,
+ * which would make every later update fail on a missing doc.
+ */
+export async function ensureUserProfile(user: User): Promise<UserProfile> {
+    const existing = await getUserProfile(user.uid);
+    if (existing) return existing;
+
+    const now = new Date().toISOString();
+    const profile: UserProfile = {
+        uid: user.uid,
+        fullName: user.displayName || user.email?.split('@')[0] || 'Operator',
+        email: (user.email || '').toLowerCase(),
+        organization: '',
+        createdAt: now,
+        updatedAt: now,
+        role: 'operator',
+        preferences: { darkMode: false, notifications: true },
+        roverConfig: {
+            roverId: 'S-104',
+            operationMode: 'Autonomous',
+            sprayRate: '120 ml/min',
+        },
+    };
+    await setDocument(`users/${user.uid}`, profile as unknown as Record<string, unknown>);
+    return profile;
+}
+
+/**
+ * Patches rover configuration on the caller's own profile.
+ * Field-scoped so it can't clobber concurrent edits to other parts of the doc.
+ */
+export async function updateRoverConfig(
+    uid: string,
+    config: Partial<UserProfile['roverConfig']>
+): Promise<void> {
+    const patch: Record<string, unknown> = { updatedAt: new Date().toISOString() };
+    for (const [key, value] of Object.entries(config)) {
+        patch[`roverConfig.${key}`] = value;
+    }
+    await updateDocument(`users/${uid}`, patch);
+}
+
+/** Patches app preferences (theme, notifications) on the caller's profile. */
+export async function updateUserPreferences(
+    uid: string,
+    prefs: Partial<UserProfile['preferences']>
+): Promise<void> {
+    const patch: Record<string, unknown> = { updatedAt: new Date().toISOString() };
+    for (const [key, value] of Object.entries(prefs)) {
+        patch[`preferences.${key}`] = value;
+    }
+    await updateDocument(`users/${uid}`, patch);
+}
+
+/** Updates the editable identity fields on the caller's profile. */
+export async function updateProfileFields(
+    uid: string,
+    fields: { fullName?: string; organization?: string }
+): Promise<void> {
+    await updateDocument(`users/${uid}`, {
+        ...fields,
+        updatedAt: new Date().toISOString(),
+    });
 }
 
 // ============================================

@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Local env config (keep .env.example tracked)
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -22,3 +27,21 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Trained model weights — large binaries, copied to the Pi out of band
+server/weights/*
+!server/weights/README.md
+server/venv/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Server credentials — never commit (see server/firebase_admin_config.py)
+server/service-account-key.json
+**/google-services.json
+**/GoogleService-Info.plist
+
+# Android signing
+*.jks
+*.keystore
